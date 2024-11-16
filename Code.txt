@@ -1,0 +1,71 @@
+!pip install torch torchvision torchaudio
+!pip install opencv-python
+!git clone https://github.com/ultralytics/yolov5.git
+%cd yolov5
+!pip install -r requirements.txtimport torch
+from pathlib import Path
+
+# Load a pre-trained YOLOv5 model (e.g., yolov5s - small model)
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s')  # Can also use yolov5m, yolov5l, yolov5ximport easyocr
+import os
+from PIL import Image
+
+# Initialize the EasyOCR reader
+reader = easyocr.Reader(['en'])
+
+# Path to the images folder (train or val)
+image_folder = '/content/yolov5/data/Output/DataSet/val'  # Change to your train folder
+output_folder = '/content/yolov5/data/Output/DataSet/val/labels'  # Change to your train labels folder
+
+# Ensure the output folder exists
+os.makedirs(output_folder, exist_ok=True)
+
+# Loop through all files in the image folder
+for image_filename in os.listdir(image_folder):
+    if image_filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff')):
+        image_path = os.path.join(image_folder, image_filename)
+
+        # Open the image to get its dimensions
+        img = Image.open(image_path)
+        img_width, img_height = img.size
+
+        # Use EasyOCR to get text boxes
+        results = reader.readtext(image_path)
+
+        # Prepare the YOLO annotation text file
+        label_filename = os.path.join(output_folder, image_filename.replace('.jpg', '.txt').replace('.jpeg', '.txt').replace('.png', '.txt'))
+
+        with open(label_filename, 'w') as f:
+            for result in results:
+                # Extract bounding box coordinates
+                bbox = result[0]  # Bounding box coordinates as a list of points
+                xmin, ymin = bbox[0]  # Top-left corner
+                xmax, ymax = bbox[2]  # Bottom-right corner
+
+                # Calculate normalized values (YOLO format)
+                x_center = (xmin + xmax) / 2.0 / img_width
+                y_center = (ymin + ymax) / 2.0 / img_height
+                width = (xmax - xmin) / float(img_width)
+                height = (ymax - ymin) / float(img_height)
+
+                # Assuming class_id is 0 for "text"
+                f.write(f"0 {x_center} {y_center} {width} {height}\n")
+				
+!python /content/yolov5/classify/train.py --img 640 --batch-size 16 --epochs 50 --data /content/yolov5/classify/dataset.yaml --device cpu
+# Step 1: Evaluate the model
+echo "Evaluating the trained YOLOv5 model..."
+python val.py --weights runs/train/exp/weights/best.pt --data data/coco.yaml --img-size 640 --batch-size 16
+
+# Step 2: Export the model to ONNX format
+echo "Exporting the model to ONNX format..."
+python export.py --weights runs/train/exp/weights/best.pt --img-size 640 --batch-size 1 --dynamic --include onnx
+
+# Optional Step 3: Export to TensorRT (if you need TensorRT optimization)
+echo "Exporting the model to TensorRT format..."
+python export.py --weights runs/train/exp/weights/best.pt --img-size 640 --batch-size 1 --include engine
+
+# Optional Step 4: Export to CoreML (if you're deploying on Apple devices)
+echo "Exporting the model to CoreML format..."
+python export.py --weights runs/train/exp/weights/best.pt --img-size 640 --batch-size 1 --include coreml
+
+echo "Post-training steps complete."
